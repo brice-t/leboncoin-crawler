@@ -118,4 +118,34 @@ class GetFrom
 
         throw new \InvalidArgumentException('Bad number of argument');
     }
+
+
+
+    public function connect( $login, $password )
+    {
+        $response = $this->client->request('POST', 'https://compteperso.leboncoin.fr/store/verify_login/0', [
+            'headers' => [
+                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding' => 'gzip, deflate, br',
+                'Accept-Language' => 'fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3',
+                'Connection' => 'keep-alive',
+                'Referer' => 'https://www.leboncoin.fr/',
+                'Upgrade-Insecure-Requests' => '1',
+                'User-Agent' => 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:58.0) Gecko/20100101 Firefox/58.0',
+            ],
+            'allow_redirects' => false,
+            'form_params' => [
+                'st_username' => $login,
+                'st_passwd' => $password,
+            ]
+        ]);
+
+        $locationExpectedStart = '/store/main/0';
+        if ($response->hasHeader('Location') &&
+            substr( $response->getHeader('Location')[0], 0, strlen($locationExpectedStart) ) == $locationExpectedStart) {
+            return true;
+        }
+
+        return false;
+    }
 }
