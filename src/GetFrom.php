@@ -3,6 +3,7 @@
 namespace Lbc;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\RequestOptions;
 use Lbc\Crawler\AdCrawler;
 use Lbc\Crawler\SearchResultCrawler;
 use Lbc\Parser\SearchResultUrlParser;
@@ -18,6 +19,11 @@ class GetFrom
      * @var Client
      */
     protected $client;
+
+    protected $authenticated = false;
+
+    protected $token = null;
+    protected $personaldata = null;
 
     /**
      * GetFrom constructor.
@@ -121,18 +127,14 @@ class GetFrom
 
 
 
+    /**
+     * Authenticate to leboncoin (set a connection cookie)
+     *
+     * @return bool|mixed
+     */
     public function connect( $login, $password )
     {
         $response = $this->client->request('POST', 'https://compteperso.leboncoin.fr/store/verify_login/0', [
-            'headers' => [
-                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Encoding' => 'gzip, deflate, br',
-                'Accept-Language' => 'fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3',
-                'Connection' => 'keep-alive',
-                'Referer' => 'https://www.leboncoin.fr/',
-                'Upgrade-Insecure-Requests' => '1',
-                'User-Agent' => 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:58.0) Gecko/20100101 Firefox/58.0',
-            ],
             'allow_redirects' => false,
             'form_params' => [
                 'st_username' => $login,
@@ -143,9 +145,96 @@ class GetFrom
         $locationExpectedStart = '/store/main/0';
         if ($response->hasHeader('Location') &&
             substr( $response->getHeader('Location')[0], 0, strlen($locationExpectedStart) ) == $locationExpectedStart) {
+            $this->authenticated = true;
             return true;
         }
 
+
+        $this->authenticated = false;
         return false;
     }
+
+
+    public function API_fetchToken( $login, $password )
+    {
+        $response = $this->client->request('POST', 'https://api.leboncoin.fr/api/oauth/v1/token', [
+            'allow_redirects' => false,
+            'form_params' => [
+                'client_id' => 'frontweb',
+                'grant_type' => 'password',
+                'username' => $login,
+                'password' => $password,
+            ]
+        ]);
+
+        $contentJSON = $response->getBody()->getContents();
+
+        $this->token = json_decode( $contentJSON );
+
+        return $this->token;
+    }
+
+
+
+
+    public function API_fetchPersonalData()
+    {
+        $url = 'https://api.leboncoin.fr/api/accounts/v1/accounts/me/personaldata';
+
+        $contentJSON = $this->client->get($url,
+            array(
+                'headers' => array(
+                    'authorization' => 'Bearer ' . $this->token->access_token,
+                )
+            ))->getBody()->getContents();
+
+        $this->personaldata = json_decode( $contentJSON );
+
+        return $this->personaldata;
+    }
+
+
+
+    public function API_listFavoritesAdIds()
+    {
+        $url = 'https://api.leboncoin.fr/api/accounts/v1/accounts/' . $this->personaldata->storeId . '/bookmarks/classified';
+
+        $contentJSON = $this->client->get($url,
+            array(
+                'headers' => array(
+                    'authorization' => 'Bearer ' . $this->token->access_token,
+                )
+            ))->getBody()->getContents();
+
+        $adIds = json_decode( $contentJSON );
+
+        return $adIds;
+    }
+
+
+
+    public function API_search( $limit, $filters )
+    {
+        $url = 'https://api.leboncoin.fr/finder/search';
+
+        $response = $this->client->request('POST', $url, [
+            'headers' => [
+                'api_key' => 'ba0c2dad52b3ec', //TODO
+                'content-type' => 'text/plain;charset=UTF-8',
+            ],
+            RequestOptions::JSON => [
+                'limit' => $limit,
+                'filters' => $filters,
+                'user_id' => $this->personaldata->userId,
+                'store_id' => strval($this->personaldata->storeId),
+            ]
+        ]);
+
+        $contentJSON = $response->getBody()->getContents();
+
+        $ads = json_decode( $contentJSON );
+
+        return $ads;
+    }
+
 }
